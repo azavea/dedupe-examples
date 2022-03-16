@@ -79,6 +79,9 @@ def cluster_ids(clustered_dupes):
         for donor_id, score in zip(cluster, scores):
             yield donor_id, cluster_id, score
 
+def clock_time():
+    curtime = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    print(curtime + "\n")
 
 if __name__ == '__main__':
     # ## Logging
@@ -103,7 +106,9 @@ if __name__ == '__main__':
     settings_file = 'pgsql_big_dedupe_example_settings'
     training_file = 'pgsql_big_dedupe_example_training.json'
 
+    print("setup")
     start_time = time.time()
+    clock_time()
 
     # Set the database connection from environment variable using
     # [dj_database_url](https://github.com/kennethreitz/dj-database-url)
@@ -139,6 +144,10 @@ if __name__ == '__main__':
 
     # ## Training
 
+    print("training beginning")
+    training_start_time = time.time()
+    clock_time()
+
     if os.path.exists(settings_file):
         print('reading from ', settings_file)
         with open(settings_file, 'rb') as sf:
@@ -173,6 +182,7 @@ if __name__ == '__main__':
         # scratch, delete the training_file
         if os.path.exists(training_file):
             print('reading labeled examples from ', training_file)
+            clock_time()
             with open(training_file) as tf:
                 deduper.prepare_training(temp_d, tf)
         else:
@@ -183,6 +193,8 @@ if __name__ == '__main__':
         # ## Active learning
 
         print('starting active labeling...')
+        clock_time()
+
         # Starts the training loop. Dedupe will find the next pair of records
         # it is least certain about and ask you to label them as duplicates
         # or not.
@@ -207,13 +219,19 @@ if __name__ == '__main__':
         # We can now remove some of the memory hogging objects we used
         # for training
         deduper.cleanup_training()
+        
+        print('Training ran in', time.time() - training_start_time, 'seconds')
+        clock_time()
 
     # ## Blocking
     print('blocking...')
+    blocking_start_time = time.time()
+    clock_time()
 
     # To run blocking on such a large set of data, we create a separate table
     # that contains blocking keys and record ids
     print('creating blocking_map database')
+    clock_time()
     with write_con:
         with write_con.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS blocking_map")
@@ -223,6 +241,7 @@ if __name__ == '__main__':
     # If dedupe learned a Index Predicate, we have to take a pass
     # through the data and create indices.
     print('creating inverted index')
+    clock_time()
 
     for field in deduper.fingerprinter.index_fields:
         with read_con.cursor('field_values') as cur:
@@ -233,6 +252,7 @@ if __name__ == '__main__':
     # Now we are ready to write our blocking map table by creating a
     # generator that yields unique `(block_key, donor_id)` tuples.
     print('writing blocking map')
+    clock_time()
 
     with read_con.cursor('donor_select') as read_cur:
         read_cur.execute(DONOR_SELECT)
@@ -247,6 +267,7 @@ if __name__ == '__main__':
                                       size=10000)
 
     # free up memory by removing indices
+    print ("removing indices")
     deduper.fingerprinter.reset_indices()
 
     logging.info("indexing block_key")
@@ -254,17 +275,27 @@ if __name__ == '__main__':
         with write_con.cursor() as cur:
             cur.execute("CREATE UNIQUE INDEX ON blocking_map "
                         "(block_key text_pattern_ops, donor_id)")
+    print('Blocking ran in', time.time() - blocking_start_time, 'seconds')
+    clock_time()  
 
     # ## Clustering
+    print('getting ready to run clustering')
+    clustering_start_time = time.time()
+    clock_time()
 
     with write_con:
         with write_con.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS entity_map")
 
             print('creating entity_map database')
+            clock_time()
             cur.execute("CREATE TABLE entity_map "
                         "(donor_id INTEGER, canon_id INTEGER, "
                         " cluster_score FLOAT, PRIMARY KEY(donor_id))")
+
+    print('executing pairs SQL statement')
+    pairs_start_time = time.time()
+    clock_time()
 
     with read_con.cursor('pairs', cursor_factory=psycopg2.extensions.cursor) as read_cur:
         read_cur.execute("""
@@ -288,7 +319,13 @@ if __name__ == '__main__':
                INNER JOIN processed_donors a on ids.east=a.donor_id
                INNER JOIN processed_donors b on ids.west=b.donor_id""")
 
+        print('pairs SQL statement ran in', time.time() - pairs_start_time, 'seconds')
+        clock_time()
+        
         print('clustering...')
+        clustered_dupes_start_time = time.time()
+        clock_time()
+
         clustered_dupes = deduper.cluster(deduper.score(record_pairs(read_cur)),
                                           threshold=0.5)
 
@@ -299,6 +336,7 @@ if __name__ == '__main__':
         # table
 
         print('writing results')
+        clock_time()
         with write_con:
             with write_con.cursor() as write_cur:
                 write_cur.copy_expert('COPY entity_map FROM STDIN WITH CSV',
@@ -308,6 +346,10 @@ if __name__ == '__main__':
     with write_con:
         with write_con.cursor() as cur:
             cur.execute("CREATE INDEX head_index ON entity_map (canon_id)")
+
+    print('Clustered Dupes ran in', time.time() - clustered_dupes_start_time, 'seconds')
+    print('Clustering ran in', time.time() - clustering_start_time, 'seconds')
+    clock_time()
 
     # Print out the number of duplicates found
 
@@ -343,6 +385,7 @@ if __name__ == '__main__':
             "WHERE donors.donor_id = donation_totals.canon_id"
         )
 
+        clock_time()
         print("Top Donors (deduped)")
         for row in cur:
             row['totals'] = locale.currency(row['totals'], grouping=True)
@@ -360,6 +403,7 @@ if __name__ == '__main__':
             "LIMIT 10"
         )
 
+        clock_time()
         print("Top Donors (raw)")
         for row in cur:
             row['totals'] = locale.currency(row['totals'], grouping=True)
@@ -369,3 +413,4 @@ if __name__ == '__main__':
     write_con.close()
 
     print('ran in', time.time() - start_time, 'seconds')
+    clock_time()
