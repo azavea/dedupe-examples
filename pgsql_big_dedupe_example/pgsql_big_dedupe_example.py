@@ -220,9 +220,10 @@ if __name__ == '__main__':
         # for training
         deduper.cleanup_training()
         
-        print('Training ran in', time.time() - training_start_time, 'seconds')
-        clock_time()
 
+    print('Training ran in', time.time() - training_start_time, 'seconds')
+    clock_time()
+        
     # ## Blocking
     print('blocking...')
     blocking_start_time = time.time()
