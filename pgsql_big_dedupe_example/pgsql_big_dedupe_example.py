@@ -318,7 +318,7 @@ if __name__ == '__main__':
     #
     # For example, let's see who the top 10 donors are.
 
-    locale.setlocale(locale.LC_ALL, '')  # for pretty printing numbers
+    locale.setlocale(locale.LC_ALL, 'en_US.UTF-8') # for pretty printing numbers
 
     # Create a temporary table so each group and unmatched record has
     # a unique id
